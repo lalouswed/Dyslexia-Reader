@@ -1,0 +1,517 @@
+/**
+ * popup.js — Dyslexia Reader v12.0
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  Changes from v11:
+ *  • readingFont selector (none / opendyslexic / lexend / atkinson)
+ *  • Reading profiles (custom / focused / study / comfort / longread)
+ *  • First-time onboarding card (shown once, dismissed to storage)
+ *  • Removed fontEnabled (replaced by readingFont:"none")
+ *  • dimStrength range updated (55–88% — never aggressive)
+ *  • Preview shows actual font for each option
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+"use strict";
+
+/* ── DEFAULTS (must sync with content.js) ─────────────────────────────────── */
+const DEFAULTS = {
+  enabled:       false,
+  readingFont:   "none",
+  theme:         "light",
+  fontSize:      115,
+  lineHeight:    1.65,
+  letterSpacing: 0.05,
+  wordSpacing:   0.12,
+  guideEnabled:  false,
+  guideMode:     "mouse",
+  guideHeight:   2.6,
+  guideOpacity:  0.22,
+  focusMode:     false,
+  focusFollow:   false,
+  dimStrength:   0.62,
+  ttsVoice:      "",
+  profile:       ""
+};
+
+// Recommended settings shown in the first-time onboarding card
+const RECOMMENDED = {
+  enabled: true, readingFont: "lexend", theme: "sepia",
+  fontSize: 115, lineHeight: 1.70, letterSpacing: 0.05, wordSpacing: 0.13,
+  guideEnabled: false, focusMode: false, focusFollow: false, dimStrength: 0.65
+};
+
+/**
+ * PROFILES — the canonical definition lives here in popup.js.
+ *
+ *  When a profile is selected, its values are stamped directly onto `cur`
+ *  BEFORE saving/broadcasting. This means content.js receives the complete
+ *  stamped settings and doesn't need its own profile logic — which was the
+ *  root cause of profiles not working (content.js was overwriting profile
+ *  values with stale cur values from the previous Object.assign).
+ *
+ *  Each profile specifies ONLY the keys it meaningfully changes.
+ *  Keys not present fall back to DEFAULTS when merged.
+ *
+ *  Profile key → data-profile attribute in popup.html
+ */
+const PROFILES = {
+  // "focused" — concentration mode: ruler + hover focus, moderate dimming
+  focused: {
+    readingFont:   "none",
+    theme:         "light",
+    fontSize:      115,
+    lineHeight:    1.68,
+    letterSpacing: 0.05,
+    wordSpacing:   0.12,
+    guideEnabled:  true,
+    guideMode:     "mouse",
+    guideHeight:   2.6,
+    guideOpacity:  0.22,
+    focusMode:     true,
+    focusFollow:   false,
+    dimStrength:   0.58,   // surrounding paragraphs at 58% — noticeable but readable
+  },
+
+  // "longread" — sepia, wider spacing, auto-follow, Lexend for eye comfort
+  longread: {
+    readingFont:   "lexend",
+    theme:         "sepia",
+    fontSize:      116,
+    lineHeight:    1.75,
+    letterSpacing: 0.04,
+    wordSpacing:   0.14,
+    guideEnabled:  false,
+    guideMode:     "mouse",
+    guideHeight:   2.6,
+    guideOpacity:  0.22,
+    focusMode:     false,
+    focusFollow:   true,
+    dimStrength:   0.68,
+  },
+
+  // "study" — fixed ruler + auto-follow, structured feel, clear contrast
+  study: {
+    readingFont:   "none",
+    theme:         "light",
+    fontSize:      115,
+    lineHeight:    1.65,
+    letterSpacing: 0.05,
+    wordSpacing:   0.12,
+    guideEnabled:  true,
+    guideMode:     "fixed",
+    guideHeight:   3.0,
+    guideOpacity:  0.26,
+    focusMode:     false,
+    focusFollow:   true,
+    dimStrength:   0.62,
+  },
+
+  // "minimal" — lightest touch: slight spacing only, nothing else
+  minimal: {
+    readingFont:   "none",
+    theme:         "light",
+    fontSize:      112,
+    lineHeight:    1.60,
+    letterSpacing: 0.03,
+    wordSpacing:   0.08,
+    guideEnabled:  false,
+    guideMode:     "mouse",
+    guideHeight:   2.6,
+    guideOpacity:  0.22,
+    focusMode:     false,
+    focusFollow:   false,
+    dimStrength:   0.80,
+  },
+};
+
+/* ── DOM refs ──────────────────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const qsa = sel => document.querySelectorAll(sel);
+
+const mainToggle = $("mainToggle"), hdrLbl = $("hdrLbl"),
+      pill       = $("pill"),       pillTxt = $("pillTxt"),
+      sbody      = $("sbody");
+
+const prevBody = $("prevBody"), prevText = $("prevText"), prevBadge = $("prevBadge");
+
+const SLIDERS = {
+  fontSize:      { el:$("fontSize"),      val:$("fsV"),  toFloat:r=>r,       toRaw:v=>Math.round(v),     label:r=>r<=100?"Small":r<=115?"Medium":r<=130?"Large":"Very Large" },
+  lineHeight:    { el:$("lineHeight"),     val:$("lhV"),  toFloat:r=>r/100,   toRaw:v=>Math.round(v*100), label:r=>r<=150?"Compact":r<=172?"Comfortable":"Spacious" },
+  letterSpacing: { el:$("letterSpacing"),  val:$("lsV"),  toFloat:r=>r/100,   toRaw:v=>Math.round(v*100), label:r=>r<=1?"Normal":r<=4?"Clear":"Very Clear" },
+  wordSpacing:   { el:$("wordSpacing"),    val:$("wsV"),  toFloat:r=>r/100,   toRaw:v=>Math.round(v*100), label:r=>r<=4?"Normal":r<=10?"Wide":"Very Wide" },
+};
+const GUIDE_SLIDERS = {
+  guideHeight:  { el:$("guideHeight"),  val:$("ghV"), toFloat:r=>r/10,  toRaw:v=>Math.round(v*10),  label:r=>(r/10).toFixed(1)+"em" },
+  guideOpacity: { el:$("guideOpacity"), val:$("goV"), toFloat:r=>r/100, toRaw:v=>Math.round(v*100), label:r=>r+"%" },
+  dimStrength:  { el:$("dimStrength"),  val:$("dimV"),toFloat:r=>r/100, toRaw:v=>Math.round(v*100), label:r=>r>=75?"Subtle":r>=62?"Balanced":"Focused" },
+};
+
+const fontOpts          = qsa(".font-opt[data-font]");
+const themeChips        = qsa(".tc[data-theme]");
+const profileBtns       = qsa(".prof[data-profile]");
+const guideToggle       = $("guideToggle");
+const focusToggle       = $("focusToggle");
+const focusFollowToggle = $("focusFollowToggle");
+const fixedHint         = $("fixedHint");
+const guideModes        = qsa(".seg-btn[data-gm]");
+const ttsStatus         = $("ttsStatus");
+const ttsStatusTxt      = $("ttsStatusTxt");
+const ttsProg           = $("ttsProg");
+const ttsP=$("ttsP"),ttsPT=$("ttsPT"),ttsS=$("ttsS"),ttsST=$("ttsST");
+const ttsPlayBtn        = $("ttsPlayBtn");
+const ttsStopBtn        = $("ttsStopBtn");
+const speedBtns         = qsa(".spd-btn[data-spd]");
+const voiceSel          = $("voiceSel");
+const sTime=$("sTime"),sWords=$("sWords"),sPace=$("sPace"),sPaceSub=$("sPaceSub");
+const sFocus=$("sFocus"),sFocusSub=$("sFocusSub");
+const refreshBtn        = $("refreshBtn");
+const resetBtn          = $("resetBtn");
+const onboardCard       = $("onboardCard");
+const obApplyBtn        = $("obApplyBtn");
+const obDismissBtn      = $("obDismissBtn");
+
+/* ── State ─────────────────────────────────────────────────────────────────── */
+let cur = { ...DEFAULTS }, ttsState = "idle", ttsSpeed = 1.0;
+
+/* ── Messaging ─────────────────────────────────────────────────────────────── */
+async function sendToTab(msg) {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs?.[0]?.id) return null;
+    return new Promise(resolve => {
+      chrome.tabs.sendMessage(tabs[0].id, msg, resp => {
+        void chrome.runtime.lastError; resolve(resp || null);
+      });
+    });
+  } catch (_) { return null; }
+}
+
+/* ── Preview font injection ────────────────────────────────────────────────── */
+let prevFontsLoaded = false;
+function ensurePreviewFonts() {
+  if (prevFontsLoaded) return;
+  try {
+    const url = n => chrome.runtime.getURL(`fonts/${n}`);
+    const s = document.createElement("style");
+    s.textContent = `
+      @font-face{font-family:"ODPreview";src:url("${url('OpenDyslexic-Regular.woff')}")format("woff");font-weight:400;font-display:swap}
+      @font-face{font-family:"ODPreview";src:url("${url('OpenDyslexic-Bold.woff')}")format("woff");font-weight:700;font-display:swap}
+      @font-face{font-family:"LXPreview";src:url("${url('Lexend-Regular.woff')}")format("woff");font-weight:400;font-display:swap}
+      @font-face{font-family:"LXPreview";src:url("${url('Lexend-Bold.woff')}")format("woff");font-weight:700;font-display:swap}
+      @font-face{font-family:"ATPreview";src:url("${url('AtkinsonHyperlegible-Regular.woff')}")format("woff");font-weight:400;font-display:swap}
+      @font-face{font-family:"ATPreview";src:url("${url('AtkinsonHyperlegible-Bold.woff')}")format("woff");font-weight:700;font-display:swap}
+    `;
+    document.head.appendChild(s);
+    prevFontsLoaded = true;
+  } catch (_) {}
+}
+
+/* Font name → preview family name */
+const PREV_FONT = {
+  none:         "inherit",
+  opendyslexic: '"ODPreview", Arial, sans-serif',
+  lexend:       '"LXPreview", Arial, sans-serif',
+  atkinson:     '"ATPreview", Arial, sans-serif',
+};
+/* Readable label for prevBadge */
+const FONT_LABELS = { none:"Default", opendyslexic:"OpenDyslexic", lexend:"Lexend", atkinson:"Atkinson" };
+
+function updatePreview() {
+  ensurePreviewFonts();
+  const isSepia = cur.theme === "sepia";
+  if (prevBody) prevBody.style.backgroundColor = isSepia ? "#F4ECD8" : "#fff";
+  prevText.style.cssText = `
+    font-family:    ${PREV_FONT[cur.readingFont] || "inherit"};
+    font-synthesis: none;
+    font-size:      ${Math.round(cur.fontSize * 0.88)}%;
+    line-height:    ${cur.lineHeight};
+    letter-spacing: ${Math.min(cur.letterSpacing, 0.10)}em;
+    word-spacing:   ${Math.min(cur.wordSpacing, 0.25)}em;
+    color:          ${isSepia ? "#2A2A2A" : "#1C1917"};
+    transition:     all 0.22s ease;
+  `;
+  prevBadge.textContent = FONT_LABELS[cur.readingFont] || "Default";
+}
+
+/* ── Status UI ─────────────────────────────────────────────────────────────── */
+function updateStatus() {
+  const on = cur.enabled;
+  hdrLbl.textContent = on ? "On" : "Off";
+  mainToggle.checked = on;
+  pill.className     = `pill ${on ? "on" : "off"}`;
+  pillTxt.textContent = on ? "Active" : "Disabled";
+  sbody.classList.toggle("off", !on);
+}
+
+/* ── Sync controls ─────────────────────────────────────────────────────────── */
+function syncFonts() {
+  fontOpts.forEach(b => {
+    const a = b.dataset.font === cur.readingFont;
+    b.classList.toggle("on", a);
+    b.setAttribute("aria-pressed", String(a));
+  });
+}
+function syncThemes() {
+  themeChips.forEach(c => {
+    c.classList.toggle("on", c.dataset.theme === cur.theme);
+    c.setAttribute("aria-pressed", String(c.dataset.theme === cur.theme));
+  });
+}
+function syncProfiles() {
+  profileBtns.forEach(b => {
+    const a = b.dataset.profile === cur.profile;
+    b.classList.toggle("on", a);
+    b.setAttribute("aria-pressed", String(a));
+  });
+}
+function syncSliders() {
+  for (const [k, cfg] of Object.entries(SLIDERS)) {
+    const raw = cfg.toRaw(cur[k]);
+    cfg.el.value = raw; cfg.val.textContent = cfg.label(raw);
+  }
+  for (const [k, cfg] of Object.entries(GUIDE_SLIDERS)) {
+    const raw = cfg.toRaw(cur[k]);
+    cfg.el.value = raw; cfg.val.textContent = cfg.label(raw);
+  }
+}
+function syncGuideModes() {
+  guideModes.forEach(b => {
+    b.classList.toggle("on", b.dataset.gm === cur.guideMode);
+    b.setAttribute("aria-pressed", String(b.dataset.gm === cur.guideMode));
+  });
+  if (fixedHint) fixedHint.style.display = cur.guideMode === "fixed" ? "flex" : "none";
+}
+function syncToggles() {
+  if (guideToggle)       guideToggle.checked       = cur.guideEnabled;
+  if (focusToggle)       focusToggle.checked       = cur.focusMode;
+  if (focusFollowToggle) focusFollowToggle.checked = cur.focusFollow;
+}
+
+function loadUI(saved) {
+  cur = { ...DEFAULTS, ...saved };
+  mainToggle.checked = cur.enabled;
+  updateStatus(); syncFonts(); syncThemes(); syncProfiles();
+  syncSliders(); syncGuideModes(); syncToggles(); updatePreview();
+}
+
+/* ── Save + broadcast ─────────────────────────────────────────────────────── */
+function saveAndBroadcast() {
+  chrome.storage.local.set(cur);
+  sendToTab({ type: "DR_APPLY_SETTINGS", settings: cur });
+  updatePreview(); updateStatus();
+}
+
+/* ── Tab navigation ────────────────────────────────────────────────────────── */
+qsa(".tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    qsa(".tab").forEach(t => { t.classList.remove("on"); t.setAttribute("aria-selected","false"); });
+    qsa(".panel").forEach(p => p.classList.remove("on"));
+    tab.classList.add("on"); tab.setAttribute("aria-selected","true");
+    $(`panel-${tab.dataset.tab}`)?.classList.add("on");
+    if (tab.dataset.tab === "stats") loadAnalytics();
+    if (tab.dataset.tab === "tools") { queryTTSStatus(); loadVoices(); }
+  });
+});
+
+/* ── Main toggle ───────────────────────────────────────────────────────────── */
+mainToggle.addEventListener("change", () => {
+  cur.enabled = mainToggle.checked; saveAndBroadcast();
+});
+
+/* ── Font options ──────────────────────────────────────────────────────────── */
+fontOpts.forEach(btn => {
+  btn.addEventListener("click", () => {
+    cur.readingFont = btn.dataset.font;
+    cur.profile = ""; syncFonts(); syncProfiles(); saveAndBroadcast();
+  });
+});
+
+/* ── Theme chips ───────────────────────────────────────────────────────────── */
+themeChips.forEach(c => {
+  c.addEventListener("click", () => {
+    cur.theme = c.dataset.theme;
+    cur.profile = ""; syncThemes(); syncProfiles(); saveAndBroadcast();
+  });
+});
+
+/* ── Reading profiles ──────────────────────────────────────────────────────── */
+profileBtns.forEach(btn => {
+  btn.addEventListener("click", () => {
+    const key = btn.dataset.profile;
+
+    if (key === "" || !PROFILES[key]) {
+      // "Custom" — just record the selection, don't change any settings
+      cur.profile = "";
+      syncProfiles();
+      saveAndBroadcast();
+      return;
+    }
+
+    // Stamp every profile value directly onto cur.
+    // This is the critical fix: previously we only set cur.profile = key and
+    // relied on content.js to merge profile values — but content.js then
+    // overwrote them with the stale cur values. Now popup.js owns the merge.
+    Object.assign(cur, PROFILES[key], { profile: key });
+
+    // Sync ALL UI controls to reflect the stamped values
+    syncFonts();
+    syncThemes();
+    syncSliders();
+    syncGuideModes();
+    syncToggles();
+    syncProfiles();
+
+    saveAndBroadcast();
+  });
+});
+
+/* ── Sliders ───────────────────────────────────────────────────────────────── */
+for (const [key, cfg] of Object.entries(SLIDERS)) {
+  cfg.el.addEventListener("input", () => {
+    const raw = parseInt(cfg.el.value, 10);
+    cur[key] = cfg.toFloat(raw); cfg.val.textContent = cfg.label(raw);
+    // Any manual slider move switches to Custom
+    cur.profile = "";
+    syncProfiles();
+    saveAndBroadcast();
+  });
+}
+for (const [key, cfg] of Object.entries(GUIDE_SLIDERS)) {
+  cfg.el.addEventListener("input", () => {
+    const raw = parseInt(cfg.el.value, 10);
+    cur[key] = cfg.toFloat(raw); cfg.val.textContent = cfg.label(raw);
+    saveAndBroadcast();
+  });
+}
+
+/* ── Guide / Focus ─────────────────────────────────────────────────────────── */
+guideModes.forEach(btn => {
+  btn.addEventListener("click", () => {
+    cur.guideMode = btn.dataset.gm;
+    cur.profile = ""; syncGuideModes(); syncProfiles(); saveAndBroadcast();
+  });
+});
+guideToggle.addEventListener("change", () => {
+  cur.guideEnabled = guideToggle.checked;
+  cur.profile = ""; syncProfiles(); saveAndBroadcast();
+});
+focusToggle.addEventListener("change", () => {
+  cur.focusMode = focusToggle.checked;
+  if (cur.focusMode) { cur.focusFollow = false; if (focusFollowToggle) focusFollowToggle.checked = false; }
+  cur.profile = ""; syncProfiles(); saveAndBroadcast();
+});
+focusFollowToggle.addEventListener("change", () => {
+  cur.focusFollow = focusFollowToggle.checked;
+  if (cur.focusFollow) { cur.focusMode = false; if (focusToggle) focusToggle.checked = false; }
+  cur.profile = ""; syncProfiles(); saveAndBroadcast();
+});
+
+/* ── Onboarding card ───────────────────────────────────────────────────────── */
+function dismissOnboarding() {
+  if (onboardCard) onboardCard.style.display = "none";
+  chrome.storage.local.set({ drOnboardingDone: true });
+}
+obApplyBtn?.addEventListener("click", () => {
+  cur = { ...cur, ...RECOMMENDED };
+  chrome.storage.local.set(cur);
+  loadUI(cur);
+  sendToTab({ type: "DR_APPLY_SETTINGS", settings: cur });
+  dismissOnboarding();
+});
+obDismissBtn?.addEventListener("click", dismissOnboarding);
+
+/* ── TTS controls ──────────────────────────────────────────────────────────── */
+function updateTTSUI(state, pIdx, sIdx, totalP, totalS) {
+  ttsState = state;
+  ttsStatus.className = ["tts-status", state === "playing" ? "playing" : "", state === "paused" ? "paused" : ""].filter(Boolean).join(" ");
+  ttsStatusTxt.textContent = state === "playing" ? "Reading aloud…" : state === "paused" ? "Paused" : "Ready to read";
+  if (ttsProg) {
+    const show = state !== "idle" && totalP > 0;
+    ttsProg.style.display = show ? "block" : "none";
+    if (show) { ttsP.textContent=String(pIdx+1); ttsPT.textContent=String(totalP); ttsS.textContent=String(sIdx+1); ttsST.textContent=totalS>0?String(totalS):"—"; }
+  }
+  if (state === "playing") { ttsPlayBtn.innerHTML='<span class="tts-ico">⏸</span> Pause'; ttsPlayBtn.classList.remove("primary"); ttsStopBtn.disabled=false; }
+  else if (state === "paused") { ttsPlayBtn.innerHTML='<span class="tts-ico">▶</span> Resume'; ttsPlayBtn.classList.add("primary"); ttsStopBtn.disabled=false; }
+  else { ttsPlayBtn.innerHTML='<span class="tts-ico">▶</span> Read Page'; ttsPlayBtn.classList.add("primary"); ttsStopBtn.disabled=true; }
+}
+
+async function queryTTSStatus() {
+  const resp = await sendToTab({ type: "DR_TTS_GET_STATUS" });
+  if (resp?.state) updateTTSUI(resp.state, resp.pIdx??0, resp.sIdx??0, resp.totalP??0, resp.totalS??0);
+}
+
+ttsPlayBtn.addEventListener("click", async () => {
+  const voiceURI = voiceSel?.value || "";
+  const action = ttsState === "idle" ? "start" : ttsState === "playing" ? "pause" : "resume";
+  const resp = await sendToTab({ type:"DR_TTS_COMMAND", action, speed:ttsSpeed, voiceURI });
+  if (resp?.state) updateTTSUI(resp.state, resp.pIdx??0, resp.sIdx??0, resp.totalP??0, resp.totalS??0);
+});
+
+ttsStopBtn.addEventListener("click", async () => {
+  const resp = await sendToTab({ type:"DR_TTS_COMMAND", action:"stop" });
+  if (resp?.state) updateTTSUI(resp.state, 0, 0, 0, 0);
+});
+
+speedBtns.forEach(btn => {
+  btn.addEventListener("click", () => {
+    ttsSpeed = parseFloat(btn.dataset.spd);
+    speedBtns.forEach(b => b.classList.toggle("on", b === btn));
+    if (ttsState === "playing") {
+      sendToTab({ type:"DR_TTS_COMMAND", action:"start", speed:ttsSpeed, voiceURI:voiceSel?.value||"" })
+        .then(resp => { if (resp?.state) updateTTSUI(resp.state, resp.pIdx??0, resp.sIdx??0, resp.totalP??0, resp.totalS??0); });
+    }
+  });
+});
+
+function populateVoices(voices) {
+  if (!voiceSel || !voices?.length) return;
+  const saved = cur.ttsVoice || "";
+  voiceSel.innerHTML = '<option value="">Default voice</option>';
+  voices.forEach(v => {
+    const opt = document.createElement("option");
+    opt.value = v.uri; opt.textContent = v.name + (v.local ? "" : " ●"); opt.selected = v.uri === saved;
+    voiceSel.appendChild(opt);
+  });
+}
+async function loadVoices() {
+  const resp = await sendToTab({ type:"DR_TTS_GET_VOICES" });
+  if (resp?.voices?.length) populateVoices(resp.voices);
+  else setTimeout(async () => { const r2=await sendToTab({type:"DR_TTS_GET_VOICES"}); if(r2?.voices?.length) populateVoices(r2.voices); }, 600);
+}
+voiceSel?.addEventListener("change", () => { cur.ttsVoice=voiceSel.value; chrome.storage.local.set({ttsVoice:cur.ttsVoice}); });
+
+/* ── Analytics ─────────────────────────────────────────────────────────────── */
+async function loadAnalytics() {
+  [sTime,sWords,sPace,sFocus].forEach(el => { if(el) el.textContent="…"; });
+  const data = await sendToTab({ type:"DR_GET_ANALYTICS" });
+  if (!data?.ok) { [sTime,sWords,sPace,sFocus].forEach(el=>{if(el)el.textContent="N/A"}); sPaceSub.textContent="Navigate to a page first"; return; }
+  if(sTime)  sTime.textContent  = data.timeOnPage||"0s";
+  if(sWords) sWords.textContent = data.wordsRead>0?"~"+data.wordsRead.toLocaleString():"0";
+  const pace = data.readingPace||"measuring";
+  if(sPace)    { sPace.textContent=pace==="measuring"?"—":pace[0].toUpperCase()+pace.slice(1); sPace.className=`stat-val p-${pace}`; }
+  if(sPaceSub) sPaceSub.textContent={slow:"take your time ✓",medium:"good flow ✓",fast:"efficient pace",measuring:"keep scrolling…"}[pace]||"";
+  const usage=data.focusUsage||"none";
+  if(sFocus)    { sFocus.textContent=data.focusActivations>0?`${data.focusActivations}×`:"0"; sFocus.className=`stat-val u-${usage}`; }
+  if(sFocusSub) sFocusSub.textContent={high:"deep engagement",medium:"moderate use",low:"light use",none:"focus mode off"}[usage]||"";
+}
+refreshBtn?.addEventListener("click", loadAnalytics);
+
+/* ── Reset ─────────────────────────────────────────────────────────────────── */
+resetBtn.addEventListener("click", () => {
+  resetBtn.style.transform="scale(0.92)"; setTimeout(()=>resetBtn.style.transform="",130);
+  const wasEnabled = cur.enabled;
+  cur = { ...DEFAULTS, enabled: wasEnabled };
+  chrome.storage.local.set(cur); loadUI(cur);
+  sendToTab({ type:"DR_APPLY_SETTINGS", settings:cur });
+  sendToTab({ type:"DR_TTS_COMMAND", action:"stop" });
+  updateTTSUI("idle",0,0,0,0);
+});
+
+/* ── Init ──────────────────────────────────────────────────────────────────── */
+chrome.storage.local.get({ ...DEFAULTS, drOnboardingDone: false }, saved => {
+  if (chrome.runtime.lastError) { loadUI(DEFAULTS); return; }
+  loadUI(saved);
+  // Show first-time onboarding card if not yet dismissed
+  if (!saved.drOnboardingDone && onboardCard) {
+    onboardCard.style.display = "block";
+  }
+});

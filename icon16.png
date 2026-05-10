@@ -1,0 +1,61 @@
+{
+  "manifest_version": 3,
+  "name": "Dyslexia Reader",
+  "version": "12.0.0",
+  "description": "Accessibility reading assistant: OpenDyslexic, Lexend & Atkinson fonts, reading profiles, focus mode, reading guide, and Read Aloud TTS.",
+
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Dyslexia Reader",
+    "default_icon": {
+      "16":  "icons/icon16.png",
+      "48":  "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "content_scripts": [
+    {
+      "matches":    ["<all_urls>"],
+      "js":         ["content.js"],
+      "run_at":     "document_start",
+      "all_frames": false
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "fonts/OpenDyslexic-Regular.woff",
+        "fonts/OpenDyslexic-Bold.woff",
+        "fonts/Lexend-Regular.woff",
+        "fonts/Lexend-Bold.woff",
+        "fonts/AtkinsonHyperlegible-Regular.woff",
+        "fonts/AtkinsonHyperlegible-Bold.woff"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
+
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

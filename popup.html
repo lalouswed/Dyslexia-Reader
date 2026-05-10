@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""
+download_font.py — Dyslexia Reader v10
+───────────────────────────────────────
+Run this ONCE before loading the extension in Chrome.
+It downloads OpenDyslexic-Regular.otf and OpenDyslexic-Bold.otf into fonts/.
+
+WHY BOTH FILES ARE NEEDED:
+The extension registers the Regular file under BOTH font-weight:normal AND
+font-weight:bold so the browser never synthesises fake-bold on headings.
+If you also supply the genuine Bold file, headings get the proper Bold variant
+instead of the Regular file stretched to bold weight.
+
+USAGE:
+    python3 download_font.py
+
+Requires Python 3.6+ and an internet connection (runs once, then works offline).
+"""
+
+import urllib.request, os, sys
+
+BASE_URL = (
+    "https://github.com/antijingoist/opendyslexic/raw/master/compiled/"
+)
+
+FONTS = [
+    ("OpenDyslexic-Regular.otf", "Regular"),
+    ("OpenDyslexic-Bold.otf",    "Bold    "),
+]
+
+DEST_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+
+
+def download(filename, label):
+    dest = os.path.join(DEST_DIR, filename)
+    if os.path.exists(dest) and os.path.getsize(dest) > 1000:
+        print(f"  ✓  {label}  already present  ({os.path.getsize(dest)//1024} KB)")
+        return True
+
+    url = BASE_URL + filename
+    print(f"  ↓  {label}  downloading from {url} …")
+    try:
+        urllib.request.urlretrieve(url, dest)
+        size = os.path.getsize(dest)
+        if size < 1000:
+            print(f"  ✗  {label}  download too small ({size} bytes) — may be an error page")
+            os.remove(dest)
+            return False
+        print(f"  ✓  {label}  saved  ({size // 1024} KB)")
+        return True
+    except Exception as e:
+        print(f"  ✗  {label}  failed: {e}")
+        return False
+
+
+def main():
+    os.makedirs(DEST_DIR, exist_ok=True)
+    print(f"\nDownloading OpenDyslexic fonts to:  {DEST_DIR}\n")
+
+    all_ok = all(download(fn, lbl) for fn, lbl in FONTS)
+
+    print()
+    if all_ok:
+        print("All fonts ready.  Load the extension in Chrome:")
+        print("  1.  chrome://extensions")
+        print("  2.  Enable Developer mode (top right)")
+        print("  3.  Load unpacked  →  select this folder")
+        print()
+        print("To verify the font loaded correctly in DevTools Console:")
+        print("  document.fonts.check('16px OpenDyslexic')  // should return true")
+    else:
+        print("Some downloads failed.  Manual alternative:")
+        print("  Download from https://opendyslexic.org  or")
+        print("  https://github.com/antijingoist/opendyslexic/releases")
+        print("  and place the .otf files in the fonts/ folder.")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

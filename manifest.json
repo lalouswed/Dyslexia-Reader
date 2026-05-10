@@ -1,0 +1,125 @@
+# 🧠 Dyslexia Reader — Chrome Extension
+
+A Manifest V3 Chrome Extension that improves readability for users with dyslexia.
+Uses OpenDyslexic font, smart theming, and non-destructive style injection.
+
+---
+
+## 📁 Folder Structure
+
+```
+dyslexia-reader/
+├── manifest.json          # Extension manifest (MV3)
+├── content.js             # Injected into every page
+├── popup.html             # Popup UI
+├── popup.js               # Popup logic
+├── download_font.py       # Helper to download the font
+├── fonts/
+│   └── OpenDyslexic-Regular.otf   ← YOU MUST ADD THIS
+└── icons/
+    ├── icon16.png
+    ├── icon48.png
+    └── icon128.png
+```
+
+---
+
+## 🚀 Setup Instructions
+
+### Step 1 — Get the OpenDyslexic Font
+
+The font is NOT included for licensing reasons. Add it one of two ways:
+
+**Option A — Automated (Python required):**
+```bash
+python3 download_font.py
+```
+
+**Option B — Manual:**
+1. Visit https://opendyslexic.org/ or https://github.com/antijingoist/opendyslexic
+2. Download `OpenDyslexic-Regular.otf`
+3. Place it at `fonts/OpenDyslexic-Regular.otf`
+
+### Step 2 — Load in Chrome
+
+1. Open Chrome and go to `chrome://extensions`
+2. Enable **Developer mode** (top-right toggle)
+3. Click **"Load unpacked"**
+4. Select the `dyslexia-reader/` folder
+5. The extension icon appears in your toolbar ✅
+
+### Step 3 — Use It
+
+1. Navigate to any website
+2. Click the **Dyslexia Reader** icon in the toolbar
+3. Toggle **Dyslexia Mode** ON
+4. Adjust typography sliders and choose a theme
+5. All settings persist across browser sessions
+
+---
+
+## 🐛 Debugging
+
+### Font Not Applying
+1. Open DevTools → Elements tab
+2. Inspect a `<p>` element
+3. Check `font-family` — should show `OpenDyslexic`
+4. If missing, go to **Application → Service Workers** and check font URL
+
+```javascript
+// In DevTools Console (on any page):
+chrome.runtime.getURL("fonts/OpenDyslexic-Regular.otf")
+// Should return something like: chrome-extension://abc.../fonts/OpenDyslexic-Regular.otf
+```
+
+### Styles Not Injecting
+1. Reload the extension at `chrome://extensions`
+2. Hard-refresh the target page (Ctrl+Shift+R)
+3. Check DevTools → Elements → `<style id="dyslexia-reader-styles">`
+
+### Check Content Script is Running
+Open DevTools Console on any page and look for errors starting with `[DyslexiaReader]`.
+
+### Storage State
+```javascript
+// In DevTools Console on any page:
+chrome.storage.local.get(null, console.log)
+// Shows all saved settings
+```
+
+---
+
+## ⚙️ Features
+
+| Feature | Details |
+|---------|---------|
+| **Font** | OpenDyslexic (local OTF file) |
+| **Line Height** | 1.4 – 2.0 (slider) |
+| **Letter Spacing** | 0 – 0.20em (slider) |
+| **Word Spacing** | 0 – 0.40em (slider) |
+| **Font Size** | 80% – 150% (slider) |
+| **Themes** | Light / Sepia / Dark |
+| **Dark Mode** | Body only, images untouched |
+| **Paragraph Highlight** | Hover highlight for focus reading |
+| **Persistence** | chrome.storage.local (survives restart) |
+| **Non-destructive** | Only targets text elements, never `*` |
+
+---
+
+## 🔒 Privacy
+
+- No network requests
+- No data collection
+- No analytics
+- All settings stored locally via `chrome.storage.local`
+
+---
+
+## 📄 Permissions Explained
+
+| Permission | Why |
+|------------|-----|
+| `storage` | Save your settings across sessions |
+| `activeTab` | Send messages to the current tab |
+| `scripting` | Inject content script dynamically |
+| `<all_urls>` | Apply reading aids on any website |
