@@ -52,7 +52,13 @@ chrome://extensions/
 
 ## Screenshots
 
-(Add screenshots here)
+<img width="378" height="597" alt="image" src="https://github.com/user-attachments/assets/8b352ca5-fab1-4c6b-af1e-5a8546e637fe" />
+<img width="1239" height="742" alt="image" src="https:<img width="1904" height="941" alt="image" src="https://github.com/user-attachments/assets/0117914d-7bb8-4f1e-949d-7939f18b5df8" />
+<img width="1904" height="941" alt="image" src="https://github.com/user-attachments/assets/6c7fc39d-8b84-453b-9e0e-782597551ab6" />
+
+
+
+
 
 ---
 
